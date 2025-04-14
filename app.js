@@ -71,11 +71,6 @@ const searchForm = document.getElementById("searchForm");
 const resultsDiv = document.getElementById("results");
 const loadingDiv = document.getElementById("loading");
 
-const checkInDateInput = document.getElementById("checkInDate");
-if (!checkInDateInput) {
-  console.warn("checkInDate input element not found. Check HTML for potential typo.");
-}
-
 // Initialize form elements
 document.addEventListener("DOMContentLoaded", () => {
   const today = new Date('2025-04-14').toISOString().split('T')[0];
@@ -143,6 +138,16 @@ function addMessageToChat(message, sender) {
 async function processUserMessage(message) {
   const lowerMessage = message.toLowerCase();
 
+  // Check for out-of-domain questions
+  const outOfDomainKeywords = ["holi", "diwali", "festival", "party", "wedding", "celebration"];
+  if (outOfDomainKeywords.some(keyword => lowerMessage.includes(keyword))) {
+    addMessageToChat(
+      "I'm sorry, I can only assist with business travel planning, such as flights, hotels, itineraries, or recommendations. How can I help you with your trip?",
+      "bot"
+    );
+    return;
+  }
+
   if (conversationState.lastQuestion === "hotel") {
     if (lowerMessage.includes("yes") || lowerMessage.includes("sure") || lowerMessage.includes("ok")) {
       searchHotels({ hotelLocation: conversationState.collectedInfo.to || conversationState.collectedInfo.hotelLocation || "Delhi" })
@@ -168,7 +173,7 @@ async function processUserMessage(message) {
     startItineraryPlanning();
   } else if (lowerMessage.includes("recommend") || lowerMessage.includes("tips") || lowerMessage.includes("suggestions")) {
     startTravelRecommendations();
-  } else if (lowerMessage.includes("flight") || lowerMessage.includes("fly")) {
+  } else if (lowerMessage.includes("flight") || lowerMessage.includes("fly") || lowerMessage.includes("deal")) {
     startFlightSearch();
   } else if (lowerMessage.includes("hotel") || lowerMessage.includes("stay")) {
     startHotelSearch();
@@ -347,6 +352,15 @@ function handleInfoCollection(message) {
 
   switch (conversationState.currentStep) {
     case "destination":
+      // Validate destination is a city
+      const normalizedInput = message.toLowerCase().replace(/\s+/g, "");
+      if (!Object.keys(cityToIATA).some(city => city.includes(normalizedInput))) {
+        addMessageToChat(
+          "Please provide a valid city name (e.g., Mumbai, Delhi, London). Where are you traveling to?",
+          "bot"
+        );
+        return;
+      }
       conversationState.collectedInfo.destination = message;
       conversationState.currentStep = "people";
       addMessageToChat("How many people are traveling?", "bot");
@@ -380,7 +394,11 @@ function handleInfoCollection(message) {
         return;
       }
       conversationState.collectedInfo.date = message;
-      completeItineraryPlanning();
+      if (conversationState.collectedInfo.from && conversationState.collectedInfo.to) {
+        completeFlightSearch();
+      } else {
+        completeItineraryPlanning();
+      }
       break;
     case "recommendLocation":
       conversationState.collectedInfo.recommendLocation = message;
@@ -469,14 +487,6 @@ function processFormSubmission(formData) {
       });
     }, formData.from && formData.to ? 1000 : 0);
   }
-  if (formData.hotelLocation && formData.checkInDate && !formData.from && !formData.to) {
-    conversationState.collectedInfo = {
-      destination: formData.hotelLocation,
-      people: 1,
-      date: formData.checkInDate
-    };
-    completeItineraryPlanning();
-  }
   resetConversationState();
 }
 
@@ -489,8 +499,12 @@ function completeItineraryPlanning() {
       resetConversationState();
       searchFormContainer.classList.add("hidden");
     })
-    .catch(() => {
+    .catch((error) => {
       hideLoading();
+      addMessageToChat(
+        `I'm sorry, I couldn't generate the itinerary. ${error.message}`,
+        "bot"
+      );
       resetConversationState();
       searchFormContainer.classList.add("hidden");
     });
@@ -775,11 +789,13 @@ function displayFlightResults(flights) {
     addMessageToChat("I couldn't find any flights matching your criteria.", "bot");
     return;
   }
+  // Sort flights by price and take top 5
+  const sortedFlights = flights.sort((a, b) => a.price - b.price).slice(0, 5);
   let resultsHTML = `
-    <div class="results-title">🛫 Found ${flights.length} Flights</div>
+    <div class="results-title">🛫 Found ${flights.length} Flights (Showing Top 5)</div>
     <div class="flight-cards">
   `;
-  flights.forEach((flight) => {
+  sortedFlights.forEach((flight) => {
     const departureTime = new Date(flight.departureTime);
     const arrivalTime = new Date(flight.arrivalTime);
     const formatTime = (date) => {
@@ -828,7 +844,7 @@ function displayFlightResults(flights) {
         font-weight: bold;
         margin-bottom: 15px;
         color: #00d4ff;
- hekt  }
+      }
       .flight-cards {
         display: flex;
         flex-direction: column;
@@ -1126,16 +1142,14 @@ async function planItinerary(data) {
   try {
     const response = await queryGeminiAPI(prompt);
     addMessageToChat(response, "bot");
-    setTimeout(() => {
-      searchHotels({ hotelLocation: destination })
-        .then(hotels => {
-          addMessageToChat("Here are some hotel options for your stay:", "bot");
-          displayHotelResults(hotels);
-        });
+    setTimeout(async () => {
+      const hotels = await searchHotels({ hotelLocation: destination });
+      addMessageToChat("Here are some hotel options for your stay:", "bot");
+      displayHotelResults(hotels);
     }, 1000);
   } catch (error) {
     console.error("Itinerary error:", error);
-    const hotels = indianHotels.filter(h => h.location.toLowerCase() === destination.toLowerCase()) || [
+    const hotels = indianHotels.filter(h => h && h.location && h.location.toLowerCase() === destination.toLowerCase()) || [
       { name: `${destination} Business Suites`, chain: "Marriott", location: destination }
     ];
     const startDate = new Date(date);
@@ -1276,12 +1290,10 @@ async function planItinerary(data) {
 - 04:00 PM: Depart ${destination}`;
     }
     addMessageToChat(itinerary, "bot");
-    setTimeout(() => {
-      searchHotels({ hotelLocation: destination })
-        .then(hotels => {
-          addMessageToChat("Here are some hotel options for your stay:", "bot");
-          displayHotelResults(hotels);
-        });
+    setTimeout(async () => {
+      const hotels = await searchHotels({ hotelLocation: destination });
+      addMessageToChat("Here are some hotel options for your stay:", "bot");
+      displayHotelResults(hotels);
     }, 1000);
   }
 }
