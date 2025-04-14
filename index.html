@@ -65,20 +65,24 @@
             transition: transform 0.2s, background 0.2s;
             max-width: 70%;
         }
-        .chat-message:hover {
-            transform: scale(1.02);
-        }
+        
         .user-message {
             text-align: right;
-            background: #ff6f61;
-            color: white;
+            background: #1a1a1a; /* Near-black background */
+            color: #dc143c; /* Vivid crimson text */
             margin-left: auto;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
         }
         .bot-message {
             text-align: left;
-            background: #26a69a;
-            color: white;
+            background: #1a1a1a; /* Near-black background */
+            color: #00cccc; /* Bright cyan text */
             margin-right: auto;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+        }
+        .chat-message:hover {
+            transform: scale(1.02);
+            background: #2c2c2c; /* Slightly lighter black on hover */
         }
         .input-container {
             display: flex;
