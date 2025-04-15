@@ -71,6 +71,15 @@ const searchForm = document.getElementById("searchForm");
 const resultsDiv = document.getElementById("results");
 const loadingDiv = document.getElementById("loading");
 
+// Chat state
+let conversationState = {
+  collectingInfo: false,
+  currentStep: null,
+  collectedInfo: {},
+  lastQuestion: null,
+  context: []
+};
+
 // Initialize form elements
 document.addEventListener("DOMContentLoaded", () => {
   const today = new Date('2025-04-14').toISOString().split('T')[0];
@@ -78,6 +87,7 @@ document.addEventListener("DOMContentLoaded", () => {
   dateInputs.forEach(input => {
     input.min = today;
   });
+  loadChatHistory();
   if (searchForm) {
     searchForm.addEventListener("submit", function(e) {
       e.preventDefault();
@@ -94,14 +104,27 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 });
 
-// Chat state
-let conversationState = {
-  collectingInfo: false,
-  currentStep: null,
-  collectedInfo: {},
-  lastQuestion: null,
-  context: []
-};
+// Load chat history from localStorage
+function loadChatHistory() {
+  const savedHistory = localStorage.getItem("chatHistory");
+  if (savedHistory) {
+    conversationState.context = JSON.parse(savedHistory);
+    conversationState.context.forEach(msg => {
+      addMessageToChat(msg.content, msg.role, false);
+    });
+  }
+  // Ensure welcome message is shown if history is empty
+  if (conversationState.context.length === 0) {
+    addMessageToChat("Hello! I'm your travel assistant. How can I help you plan your business trip today?", "bot");
+  }
+}
+
+// Save chat history to localStorage
+function saveChatHistory() {
+  // Limit to last 20 messages to prevent excessive storage
+  const limitedContext = conversationState.context.slice(-20);
+  localStorage.setItem("chatHistory", JSON.stringify(limitedContext));
+}
 
 // Event Listeners
 sendButton.addEventListener("click", handleUserMessage);
@@ -111,27 +134,45 @@ userInput.addEventListener("keypress", (e) => {
   }
 });
 
-// Chat Functions
+// Debounce to prevent duplicate messages
+let isProcessing = false;
 function handleUserMessage() {
+  if (isProcessing) return;
+  isProcessing = true;
   const message = userInput.value.trim();
-  if (!message) return;
+  if (!message) {
+    isProcessing = false;
+    return;
+  }
   addMessageToChat(message, "user");
   userInput.value = "";
-  setTimeout(() => processUserMessage(message), 500);
+  setTimeout(() => {
+    processUserMessage(message);
+    isProcessing = false;
+  }, 500);
 }
 
-function addMessageToChat(message, sender) {
+// Modified addMessageToChat to prevent duplicates and handle history
+function addMessageToChat(message, sender, save = true) {
+  // Prevent adding the same message twice
+  const lastMessage = conversationState.context.length > 0 
+    ? conversationState.context[conversationState.context.length - 1] : null;
+  if (lastMessage && lastMessage.content === message && lastMessage.role === sender) {
+    return;
+  }
+
   const messageDiv = document.createElement("div");
   messageDiv.className = `chat-message ${sender}-message`;
   messageDiv.innerHTML = `<p>${message}</p>`;
   chatContainer.appendChild(messageDiv);
   chatContainer.scrollTop = chatContainer.scrollHeight;
-  conversationState.context.push({
-    role: sender === "user" ? "user" : "assistant",
-    content: message
-  });
-  if (conversationState.context.length > 20) {
-    conversationState.context = conversationState.context.slice(-20);
+
+  if (save) {
+    conversationState.context.push({
+      role: sender === "user" ? "user" : "assistant",
+      content: message
+    });
+    saveChatHistory();
   }
 }
 
@@ -185,12 +226,22 @@ async function processUserMessage(message) {
   } else if (lowerMessage.includes("no") || lowerMessage.includes("exit") || lowerMessage.includes("quit")) {
     addMessageToChat("Thank you! Visit again. Developed by Siddharth and Ashutosh", "bot");
     resetConversationState();
+  } else if (lowerMessage.includes("clear history")) { // Added clear history command
+    clearChatHistory();
   } else {
     addMessageToChat(
       "I'm not sure I understand. Try asking about flights, hotels, itineraries, recommendations, or attractions, or type 'help' for options.",
       "bot"
     );
   }
+}
+
+// Clear chat history
+function clearChatHistory() {
+  localStorage.removeItem("chatHistory");
+  conversationState.context = [];
+  chatContainer.innerHTML = "";
+  addMessageToChat("Chat history cleared! How can I assist you now?", "bot");
 }
 
 async function queryGeminiAPI(message) {
@@ -535,10 +586,6 @@ function completeFlightSearch() {
       displayFlightResults(flights);
       resetConversationState();
       searchFormContainer.classList.add("hidden");
-      setTimeout(() => {
-        addMessageToChat("Would you like to search for hotels at your destination as well?", "bot");
-        conversationState.lastQuestion = "hotel";
-      }, 1000);
     })
     .catch((error) => {
       hideLoading();
@@ -967,10 +1014,6 @@ function displayFlightResults(flights) {
     </style>
   `;
   addMessageToChat(resultsHTML, "bot");
-  setTimeout(() => {
-    addMessageToChat("Would you like to search for hotels at your destination as well?", "bot");
-    conversationState.lastQuestion = "hotel";
-  }, 1000);
 }
 
 function displayHotelResults(hotels) {
@@ -1100,14 +1143,6 @@ function displayHotelResults(hotels) {
     </style>
   `;
   addMessageToChat(resultsHTML, "bot");
-  if (hotels.length > 0) {
-    const location = hotels[0].location.toLowerCase();
-    if (touristAttractions[location]) {
-      setTimeout(() => {
-        addMessageToChat(`Would you like to see popular tourist attractions in ${hotels[0].location}?`, "bot");
-      }, 1000);
-    }
-  }
 }
 
 function showLoading() {
